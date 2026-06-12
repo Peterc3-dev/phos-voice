@@ -161,6 +161,7 @@ def main():
                          "If it's low RAM (OOM): run the fast 0.6B alone with\n"
                          "  VC_MODEL=~/phos/Qwen3-0.6B-Q4_K_M.gguf python ~/phos/phos_voice.py")
     history = [{"role": "system", "content": persona}]
+    sh(["termux-wake-lock"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # survive backgrounding
     print(f"{C['g']}Phos (on-phone, llama.cpp) — Qwen3-1.7B. Ctrl-C or say 'goodbye' to quit.{C['r']}")
     tts("Phos online. What's up?")
     try:
@@ -185,6 +186,8 @@ def main():
             tts(reply)
     except KeyboardInterrupt:
         print("\n" + C['g'] + "bye." + C['r'])
+    finally:
+        sh(["termux-wake-unlock"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":
