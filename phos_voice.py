@@ -20,7 +20,8 @@ DIR = os.path.join(HOME, "phos")
 WHISPER = os.path.join(DIR, "whisper-cli")
 WMODEL = os.path.join(DIR, "ggml-base.en-q5_1.bin")
 LLAMA_SERVER = os.path.join(DIR, "llama-server")
-GGUF = os.path.join(DIR, "Qwen3-1.7B-Q4_K_M.gguf")
+GGUF = os.environ.get("VC_MODEL", os.path.join(DIR, "Qwen3-1.7B-Q4_K_M.gguf"))   # main; override to run 0.6B alone
+DRAFT = os.path.join(DIR, "Qwen3-0.6B-Q4_K_M.gguf")   # speculative-decoding draft (same Qwen3 vocab)
 PERSONA_FILE = os.path.join(DIR, "phos-system-prompt.txt")
 M4A, WAV = os.path.join(DIR, "in.m4a"), os.path.join(DIR, "in.wav")
 HEALTH = "http://127.0.0.1:8080/health"
@@ -47,10 +48,15 @@ def _server_responding():
 def ensure_server():
     """Start the i8mm llama-server on the GGUF if not already up; wait until it's healthy (200)."""
     if not _server_responding():
-        print(f"{C['d']}starting llama-server (loading model, first time ~30-60s)…{C['r']}")
-        subprocess.Popen([LLAMA_SERVER, "-m", GGUF, "-t", THREADS, "-c", "2048",
-                          "--host", "127.0.0.1", "--port", "8080"],
-                         stdout=open(os.path.join(DIR, "llama-server.log"), "w"),
+        cmd = [LLAMA_SERVER, "-m", GGUF, "-t", THREADS, "-c", "2048",
+               "--host", "127.0.0.1", "--port", "8080"]
+        use_draft = os.path.exists(DRAFT) and os.path.realpath(DRAFT) != os.path.realpath(GGUF)
+        if use_draft:                                  # speculative decoding: 0.6B drafts, 1.7B verifies
+            cmd += ["-md", DRAFT, "--draft-max", "8", "--draft-min", "1", "-cd", "1024"]
+            print(f"{C['d']}starting llama-server + speculative draft (first load ~30-60s)…{C['r']}")
+        else:
+            print(f"{C['d']}starting llama-server (first load ~30-60s)…{C['r']}")
+        subprocess.Popen(cmd, stdout=open(os.path.join(DIR, "llama-server.log"), "w"),
                          stderr=subprocess.STDOUT)
     for _ in range(90):                               # model load can be slow on the phone
         try:
@@ -112,7 +118,9 @@ def main():
     persona = open(PERSONA_FILE).read() if os.path.exists(PERSONA_FILE) else \
         "You are Phos, a warm, concise, offline voice companion. Plain spoken replies, no roleplay. /no_think"
     if not ensure_server():
-        raise SystemExit("llama-server failed to come up — see ~/phos/llama-server.log")
+        raise SystemExit("llama-server failed to come up — see ~/phos/llama-server.log\n"
+                         "If it's low RAM (OOM): run the fast 0.6B alone with\n"
+                         "  VC_MODEL=~/phos/Qwen3-0.6B-Q4_K_M.gguf python ~/phos/phos_voice.py")
     history = [{"role": "system", "content": persona}]
     print(f"{C['g']}Phos (on-phone, llama.cpp) — Qwen3-1.7B. Ctrl-C or say 'goodbye' to quit.{C['r']}")
     tts("Phos online. What's up?")
