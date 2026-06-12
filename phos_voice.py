@@ -48,7 +48,7 @@ def ensure_server():
     """Start the i8mm llama-server on the GGUF if not already up; wait until it's healthy (200)."""
     if not _server_responding():
         print(f"{C['d']}starting llama-server (loading model, first time ~30-60s)…{C['r']}")
-        subprocess.Popen([LLAMA_SERVER, "-m", GGUF, "-t", THREADS, "-c", "4096",
+        subprocess.Popen([LLAMA_SERVER, "-m", GGUF, "-t", THREADS, "-c", "2048",
                           "--host", "127.0.0.1", "--port", "8080"],
                          stdout=open(os.path.join(DIR, "llama-server.log"), "w"),
                          stderr=subprocess.STDOUT)

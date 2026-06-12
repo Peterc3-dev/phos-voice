@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.gguf
+in.m4a
+in.wav
+*.log
