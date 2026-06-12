@@ -82,21 +82,42 @@ public class RecActivity extends Activity {
             }
         } catch (Exception ignored) {}
 
+        // VAD capture: calibrate an ambient floor, record while you speak, stop after a short
+        // trailing silence — capped at `secs`. No fixed wait; gives up if you never speak.
+        final int CHUNK_MS = 50;
+        final int chunkBytes = (SR / 1000 * CHUNK_MS) * 2;        // 50 ms of int16 mono = 1600 B
+        final int MAX_MS = Math.max(secs, 2) * 1000;
+        final int AMBIENT_MS = 400, TRAIL_SILENCE_MS = 700, NOSPEECH_GIVEUP_MS = 3500;
         int min = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        int buf = Math.max(min, SR);   // ~0.5s of int16 samples
         AudioRecord rec = null;
         ByteArrayOutputStream pcm = new ByteArrayOutputStream();
+        boolean speaking = false;
         try {
             rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SR,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buf * 2);
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, chunkBytes * 8));
             if (rec.getState() != AudioRecord.STATE_INITIALIZED)
                 throw new IllegalStateException("AudioRecord init failed");
-            byte[] chunk = new byte[buf];
+            byte[] chunk = new byte[chunkBytes];
             rec.startRecording();
-            long end = System.currentTimeMillis() + secs * 1000L;
-            while (System.currentTimeMillis() < end) {
+            double noiseSum = 0; int noiseN = 0;
+            int totalMs = 0, silentMs = 0;
+            long startNs = System.nanoTime();
+            while (totalMs < MAX_MS) {
                 int n = rec.read(chunk, 0, chunk.length);
-                if (n > 0) pcm.write(chunk, 0, n);
+                if (n < 0) break;                                                    // hard read error
+                if (n == 0) {                                                        // no frame yet (e.g. SCO drop)
+                    if ((System.nanoTime() - startNs) / 1_000_000L > MAX_MS + 1500) break;
+                    continue;
+                }
+                pcm.write(chunk, 0, n);
+                totalMs += CHUNK_MS;
+                double rms = rms16(chunk, n);
+                if (totalMs <= AMBIENT_MS) { noiseSum += rms; noiseN++; continue; }   // ambient floor
+                double floor = Math.min(noiseN > 0 ? noiseSum / noiseN : 200.0, 400.0);  // cap so early speech can't blow up the gate
+                double thresh = Math.max(floor * 3.0, 500.0);
+                if (rms > thresh) { speaking = true; silentMs = 0; }
+                else if (speaking) { silentMs += CHUNK_MS; if (silentMs >= TRAIL_SILENCE_MS) break; }
+                if (!speaking && totalMs >= NOSPEECH_GIVEUP_MS) break;                 // never spoke
             }
         } catch (Exception ignored) {
         } finally {
@@ -106,11 +127,20 @@ public class RecActivity extends Activity {
         }
 
         try {
-            if (pcm.size() > 0) {                            // only signal done on a real capture
+            if (speaking && pcm.size() > 4000) {             // only signal done on real captured speech
                 writeWav(outPath, pcm.toByteArray());
                 new File(outPath + ".done").createNewFile(); // completion marker for the shell
             }
         } catch (IOException ignored) {}
+    }
+
+    private static double rms16(byte[] b, int n) {
+        long sum = 0; int cnt = 0;
+        for (int i = 0; i + 1 < n; i += 2) {
+            short s = (short) ((b[i] & 0xff) | (b[i + 1] << 8));
+            sum += (long) s * s; cnt++;
+        }
+        return cnt == 0 ? 0.0 : Math.sqrt((double) sum / cnt);
     }
 
     private static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException e) {} }

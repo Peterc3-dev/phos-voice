@@ -89,12 +89,13 @@ def _rm(*paths):
 
 
 def record_bt():
-    """Capture from the Bluetooth headset mic via the PhosRec app -> /sdcard/phos/in.wav."""
+    """Capture via the PhosRec app (VAD auto-stop; BT headset mic if connected, else phone mic)."""
+    cap = int(os.environ.get("VC_MAX", "12"))                # max cap; VAD ends the turn early on silence
     done = BT_WAV + ".done"
     _rm(BT_WAV, done)
-    print(f"{C['d']}🎤 speak now ({SECS}s, BT headset)…{C['r']}", flush=True)
+    print(f"{C['d']}🎤 listening… (just talk; stops when you pause){C['r']}", flush=True)
     am = (f"am start -n io.cin.phosrec/.RecActivity -a io.cin.phosrec.RECORD "
-          f"--ei secs {SECS} --es out {BT_OUT}")
+          f"--ei secs {cap} --es out {BT_OUT}")
     # VC_AM_SU=1 launches via root (most reliable for starting a foreign activity from Termux);
     # default is plain `am`. If BT mode never captures, set VC_AM_SU=1 (the phone is rooted).
     cmd = ["su", "-c", am] if os.environ.get("VC_AM_SU") == "1" else am.split()
@@ -102,7 +103,7 @@ def record_bt():
         sh(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=12)
     except Exception:
         pass
-    deadline = time.time() + SECS + 10                       # SCO setup adds ~1.5s + headroom
+    deadline = time.time() + cap + 8                         # VAD ends early; cap + SCO/headroom
     while time.time() < deadline:
         if os.path.exists(done):
             break
