@@ -26,7 +26,7 @@ PERSONA_FILE = os.path.join(DIR, "phos-system-prompt.txt")
 M4A, WAV = os.path.join(DIR, "in.m4a"), os.path.join(DIR, "in.wav")
 HEALTH = "http://127.0.0.1:8080/health"
 CHAT = "http://127.0.0.1:8080/v1/chat/completions"
-SECS = int(os.environ.get("VC_SECS", "6"))
+SECS = int(os.environ.get("VC_SECS", "4"))           # listen window; VC_SECS=3 snappier, 8 if it clips you
 THREADS = os.environ.get("VC_THREADS", "4")          # 4 = best generation on the MT6886 (measured)
 # VC_BT=1 -> capture from the Bluetooth headset mic via the PhosRec app (writes /sdcard/phos/in.wav,
 # 16 kHz mono, already whisper-ready). Needs the app installed + termux-setup-storage run once.
@@ -55,6 +55,8 @@ def ensure_server():
     if not _server_responding():
         cmd = [LLAMA_SERVER, "-m", GGUF, "-t", THREADS, "-c", "2048",
                "--host", "127.0.0.1", "--port", "8080"]
+        if os.environ.get("VC_NOOPT") != "1":          # flash-attn + q8_0 KV cache: less RAM, a bit faster
+            cmd += ["-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0"]   # set VC_NOOPT=1 if the server won't start
         use_draft = os.path.exists(DRAFT) and os.path.realpath(DRAFT) != os.path.realpath(GGUF)
         if use_draft:                                  # speculative decoding: 0.6B drafts, 1.7B verifies
             cmd += ["-md", DRAFT, "--draft-max", "8", "--draft-min", "1", "-cd", "1024"]
