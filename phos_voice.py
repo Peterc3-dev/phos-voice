@@ -28,6 +28,11 @@ HEALTH = "http://127.0.0.1:8080/health"
 CHAT = "http://127.0.0.1:8080/v1/chat/completions"
 SECS = int(os.environ.get("VC_SECS", "6"))
 THREADS = os.environ.get("VC_THREADS", "4")          # 4 = best generation on the MT6886 (measured)
+# VC_BT=1 -> capture from the Bluetooth headset mic via the PhosRec app (writes /sdcard/phos/in.wav,
+# 16 kHz mono, already whisper-ready). Needs the app installed + termux-setup-storage run once.
+USE_BT = os.environ.get("VC_BT", "0") == "1"
+BT_WAV = os.path.join(HOME, "storage", "shared", "phos", "in.wav")   # /sdcard/phos/in.wav via Termux storage
+BT_OUT = "/sdcard/phos/in.wav"                                       # path as the PhosRec app writes it
 C = dict(g="\033[32m", c="\033[36m", y="\033[33m", d="\033[2m", r="\033[0m")
 
 
@@ -73,26 +78,57 @@ def tts(text):
     sh(["termux-tts-speak", "-r", "1.0", text])
 
 
-def record():
-    print(f"{C['d']}🎤 speak now ({SECS}s)…{C['r']}", flush=True)
-    for f in (M4A, WAV):
+def _rm(*paths):
+    for f in paths:
         try:
             os.remove(f)
         except OSError:
             pass
+
+
+def record_bt():
+    """Capture from the Bluetooth headset mic via the PhosRec app -> /sdcard/phos/in.wav."""
+    done = BT_WAV + ".done"
+    _rm(BT_WAV, done)
+    print(f"{C['d']}🎤 speak now ({SECS}s, BT headset)…{C['r']}", flush=True)
+    am = (f"am start -n io.cin.phosrec/.RecActivity -a io.cin.phosrec.RECORD "
+          f"--ei secs {SECS} --es out {BT_OUT}")
+    # VC_AM_SU=1 launches via root (most reliable for starting a foreign activity from Termux);
+    # default is plain `am`. If BT mode never captures, set VC_AM_SU=1 (the phone is rooted).
+    cmd = ["su", "-c", am] if os.environ.get("VC_AM_SU") == "1" else am.split()
+    try:
+        sh(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=12)
+    except Exception:
+        pass
+    deadline = time.time() + SECS + 10                       # SCO setup adds ~1.5s + headroom
+    while time.time() < deadline:
+        if os.path.exists(done):
+            break
+        time.sleep(0.3)
+    return BT_WAV if (os.path.exists(BT_WAV) and os.path.getsize(BT_WAV) > 2000) else None
+
+
+def record_phone():
+    """Capture from the phone's built-in mic via termux-microphone-record -> ~/phos/in.wav."""
+    _rm(M4A, WAV)
+    print(f"{C['d']}🎤 speak now ({SECS}s)…{C['r']}", flush=True)
     sh(["termux-microphone-record", "-f", M4A, "-l", str(SECS), "-e", "aac"],
        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(SECS + 0.4)
     sh(["termux-microphone-record", "-q"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not (os.path.exists(M4A) and os.path.getsize(M4A) > 1500):
-        return False
+        return None
     sh(["ffmpeg", "-y", "-i", M4A, "-ar", "16000", "-ac", "1", WAV],
        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return os.path.exists(WAV) and os.path.getsize(WAV) > 2000
+    return WAV if (os.path.exists(WAV) and os.path.getsize(WAV) > 2000) else None
 
 
-def transcribe():
-    out = sh([WHISPER, "-m", WMODEL, "-f", WAV, "-nt", "-np", "-l", "en", "-t", "6"],
+def record():
+    return record_bt() if USE_BT else record_phone()
+
+
+def transcribe(wav):
+    out = sh([WHISPER, "-m", WMODEL, "-f", wav, "-nt", "-np", "-l", "en", "-t", "6"],
              capture_output=True, text=True)
     return re.sub(r"\[[A-Z_ ]+\]", "", (out.stdout or "")).strip()
 
@@ -126,10 +162,11 @@ def main():
     tts("Phos online. What's up?")
     try:
         while True:
-            if not record():
+            wav = record()
+            if not wav:
                 print(f"{C['d']}(no audio — try again){C['r']}")
                 continue
-            user = transcribe()
+            user = transcribe(wav)
             if not user:
                 print(f"{C['d']}(couldn't make that out){C['r']}")
                 continue
