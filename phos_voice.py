@@ -33,6 +33,7 @@ THREADS = os.environ.get("VC_THREADS", "4")          # 4 = best generation on th
 USE_BT = os.environ.get("VC_BT", "0") == "1"
 BT_WAV = os.path.join(HOME, "storage", "shared", "phos", "in.wav")   # /sdcard/phos/in.wav via Termux storage
 BT_OUT = "/sdcard/phos/in.wav"                                       # path as the PhosRec app writes it
+BEEP = os.path.join(DIR, "beep.wav")                                 # "thinking" cue
 C = dict(g="\033[32m", c="\033[36m", y="\033[33m", d="\033[2m", r="\033[0m")
 
 
@@ -78,6 +79,43 @@ def ensure_server():
 
 def tts(text):
     sh(["termux-tts-speak", "-r", "1.0", text])
+
+
+def thinking_cue():
+    """Let you know it heard you and is processing — works screen-locked / not looking."""
+    sh(["termux-vibrate", "-d", "180"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(BEEP):
+        sh(["termux-media-player", "play", BEEP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _am_run(cmd):
+    """Run an `am` command — via root when VC_AM_SU=1 (works backgrounded / over the lock screen)."""
+    runner = ["su", "-c", cmd] if os.environ.get("VC_AM_SU") == "1" else cmd.split()
+    try:
+        sh(runner, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    except Exception:
+        pass
+
+
+def cmd_mirror():                                       # front camera / selfie view
+    _am_run("am start -a android.media.action.STILL_IMAGE_CAMERA "
+            "--ei android.intent.extras.CAMERA_FACING 1 --ez android.intent.extra.USE_FRONT_CAMERA true")
+
+
+# Fast actions matched BEFORE the LLM — instant, no model round-trip. Add more here.
+COMMANDS = [
+    (re.compile(r"\bmirror me\b|\bselfie\b", re.I), cmd_mirror, "mirror (front camera)"),
+]
+
+
+def handle_command(text):
+    """If the utterance is a fast action, run it and return True (skips the LLM this turn)."""
+    for pat, fn, label in COMMANDS:
+        if pat.search(text):
+            print(f"{C['y']}⚡ {label}{C['r']}", flush=True)
+            fn()
+            return True
+    return False
 
 
 def _rm(*paths):
@@ -183,11 +221,15 @@ def main():
             if re.search(r"\b(goodbye|good bye|quit|exit)\b", user, re.I):
                 tts("Talk soon, Boo.")
                 break
+            if handle_command(user):                # fast action (e.g. "mirror me") — no LLM
+                continue
             history.append({"role": "user", "content": user})
+            thinking_cue()                          # beep + buzz: heard you, processing
             print(f"{C['d']}…thinking{C['r']}", flush=True)
             reply = llm(history)
             history.append({"role": "assistant", "content": reply})
             print(f"{C['y']}phos ▸ {reply}{C['r']}", flush=True)
+            sh(["termux-media-player", "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # cut any lingering beep
             tts(reply)
     except KeyboardInterrupt:
         print("\n" + C['g'] + "bye." + C['r'])

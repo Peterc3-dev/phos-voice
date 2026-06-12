@@ -14,7 +14,7 @@ echo "[1/5] Termux packages (ffmpeg, termux-api, python, wget)…"
 pkg install -y ffmpeg termux-api python wget >/dev/null
 
 echo "[2/5] copy app files + binaries -> $DIR…"
-cp "$SRC/phos_voice.py" "$SRC/phos-system-prompt.txt" "$SRC/whisper-cli" "$SRC/llama-server" "$DIR/"
+cp "$SRC/phos_voice.py" "$SRC/phos-system-prompt.txt" "$SRC/whisper-cli" "$SRC/llama-server" "$SRC/beep.wav" "$DIR/"
 chmod +x "$DIR/whisper-cli" "$DIR/llama-server"
 
 echo "[3/5] whisper STT model (~57 MB, one-time)…"
