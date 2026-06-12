@@ -69,18 +69,22 @@ public class RecActivity extends Activity {
 
     private void record(int secs, String outPath) {
         AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-        boolean sco = false;
+        boolean useSco = false;
         try {
-            am.setMode(AudioManager.MODE_IN_COMMUNICATION);
             AudioDeviceInfo dev = null;
             for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
                 if (d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) { dev = d; break; }
             }
-            if (dev != null) {
-                sco = am.setCommunicationDevice(dev);
-                sleep(1500);   // let the SCO link establish before reading
+            if (dev != null) {                                   // only enter comm-mode for an actual BT headset
+                am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                useSco = am.setCommunicationDevice(dev);
+                if (useSco) sleep(1500);                         // let the SCO link establish
             }
         } catch (Exception ignored) {}
+        // Phone mic: plain MIC source, NO comm-mode (comm-mode + VOICE_COMMUNICATION on the
+        // built-in mic applies far-field/echo processing that kills the level). BT: VOICE_COMMUNICATION.
+        int source = useSco ? MediaRecorder.AudioSource.VOICE_COMMUNICATION
+                            : MediaRecorder.AudioSource.MIC;
 
         // VAD capture: calibrate an ambient floor, record while you speak, stop after a short
         // trailing silence — capped at `secs`. No fixed wait; gives up if you never speak.
@@ -92,8 +96,10 @@ public class RecActivity extends Activity {
         AudioRecord rec = null;
         ByteArrayOutputStream pcm = new ByteArrayOutputStream();
         boolean speaking = false;
+        double peakRms = 0, dbgFloor = 0, dbgThresh = 0;
+        int dbgMs = 0;
         try {
-            rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SR,
+            rec = new AudioRecord(source, SR,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, chunkBytes * 8));
             if (rec.getState() != AudioRecord.STATE_INITIALIZED)
                 throw new IllegalStateException("AudioRecord init failed");
@@ -111,20 +117,33 @@ public class RecActivity extends Activity {
                 }
                 pcm.write(chunk, 0, n);
                 totalMs += CHUNK_MS;
+                dbgMs = totalMs;
                 double rms = rms16(chunk, n);
+                if (rms > peakRms) peakRms = rms;
                 if (totalMs <= AMBIENT_MS) { noiseSum += rms; noiseN++; continue; }   // ambient floor
-                double floor = Math.min(noiseN > 0 ? noiseSum / noiseN : 200.0, 400.0);  // cap so early speech can't blow up the gate
-                double thresh = Math.max(floor * 3.0, 500.0);
-                if (rms > thresh) { speaking = true; silentMs = 0; }
+                dbgFloor = Math.min(noiseN > 0 ? noiseSum / noiseN : 200.0, 400.0);   // cap so early speech can't blow up the gate
+                dbgThresh = Math.max(dbgFloor * 3.0, 500.0);
+                if (rms > dbgThresh) { speaking = true; silentMs = 0; }
                 else if (speaking) { silentMs += CHUNK_MS; if (silentMs >= TRAIL_SILENCE_MS) break; }
                 if (!speaking && totalMs >= NOSPEECH_GIVEUP_MS) break;                 // never spoke
             }
         } catch (Exception ignored) {
         } finally {
             if (rec != null) { try { rec.stop(); } catch (Exception e) {} rec.release(); }
-            try { am.clearCommunicationDevice(); } catch (Exception e) {}
-            try { am.setMode(AudioManager.MODE_NORMAL); } catch (Exception e) {}
+            if (useSco) {                                        // only undo comm-mode if we set it
+                try { am.clearCommunicationDevice(); } catch (Exception e) {}
+                try { am.setMode(AudioManager.MODE_NORMAL); } catch (Exception e) {}
+            }
         }
+
+        // debug stats (read over ssh to tune VAD): mic source, levels, whether speech fired
+        try {
+            java.io.FileWriter fw = new java.io.FileWriter(outPath + ".stats");
+            fw.write("src=" + (useSco ? "SCO" : "MIC") + " peak_rms=" + (long) peakRms
+                    + " floor=" + (long) dbgFloor + " thresh=" + (long) dbgThresh
+                    + " speaking=" + speaking + " ms=" + dbgMs + " bytes=" + pcm.size() + "\n");
+            fw.close();
+        } catch (Exception ignored) {}
 
         try {
             if (speaking && pcm.size() > 4000) {             // only signal done on real captured speech

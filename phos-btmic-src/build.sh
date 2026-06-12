@@ -27,13 +27,14 @@ echo "[4/8] add classes.dex into apk"
 echo "[5/8] zipalign"
 "$BT/zipalign" -p -f 4 build/base.apk build/aligned.apk
 
-echo "[6/8] debug keystore"
-[ -f build/debug.keystore ] || keytool -genkeypair -keystore build/debug.keystore \
+echo "[6/8] keystore (PERSISTENT — outside build/ so updates keep the same signature)"
+KS="$HERE/phos.keystore"
+[ -f "$KS" ] || keytool -genkeypair -keystore "$KS" \
     -storepass android -keypass android -alias dbg -keyalg RSA -keysize 2048 \
     -validity 10000 -dname "CN=Phos Debug" >/dev/null 2>&1
 
 echo "[7/8] sign"
-"$BT/apksigner" sign --ks build/debug.keystore --ks-pass pass:android \
+"$BT/apksigner" sign --ks "$KS" --ks-pass pass:android \
     --key-pass pass:android --ks-key-alias dbg --out build/phos-btmic.apk build/aligned.apk
 
 echo "[8/8] verify"

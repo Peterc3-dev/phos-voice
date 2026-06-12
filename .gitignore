@@ -4,3 +4,4 @@ __pycache__/
 in.m4a
 in.wav
 *.log
+*.keystore
