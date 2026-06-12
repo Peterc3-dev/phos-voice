@@ -10,7 +10,7 @@ rm -rf build && mkdir -p build/classes
 
 echo "[1/8] javac"
 javac -source 17 -target 17 -classpath "$AJAR" -d build/classes \
-    src/io/cin/phosrec/RecActivity.java
+    src/io/cin/phosrec/*.java
 
 echo "[2/8] d8 -> classes.dex"
 "$BT/d8" --min-api 31 --release --lib "$AJAR" --output build \

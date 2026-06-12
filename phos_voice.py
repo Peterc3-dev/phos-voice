@@ -94,11 +94,16 @@ def record_bt():
     done = BT_WAV + ".done"
     _rm(BT_WAV, done)
     print(f"{C['d']}🎤 listening… (just talk; stops when you pause){C['r']}", flush=True)
-    am = (f"am start -n io.cin.phosrec/.RecActivity -a io.cin.phosrec.RECORD "
-          f"--ei secs {cap} --es out {BT_OUT}")
-    # VC_AM_SU=1 launches via root (most reliable for starting a foreign activity from Termux);
-    # default is plain `am`. If BT mode never captures, set VC_AM_SU=1 (the phone is rooted).
-    cmd = ["su", "-c", am] if os.environ.get("VC_AM_SU") == "1" else am.split()
+    if os.environ.get("VC_AM_SU") == "1":
+        # background-capable: mic-type foreground SERVICE via root (works screen-off / Termux backgrounded)
+        am = (f"am start-foreground-service -n io.cin.phosrec/.RecService -a io.cin.phosrec.RECORD "
+              f"--ei secs {cap} --es out {BT_OUT}")
+        cmd = ["su", "-c", am]
+    else:
+        # foreground only: the activity (no root). Use VC_AM_SU=1 for background/pocket use.
+        am = (f"am start -n io.cin.phosrec/.RecActivity -a io.cin.phosrec.RECORD "
+              f"--ei secs {cap} --es out {BT_OUT}")
+        cmd = am.split()
     try:
         sh(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=12)
     except Exception:
