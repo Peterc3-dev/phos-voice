@@ -4,10 +4,12 @@ A fully on-device, offline voice back-and-forth assistant that runs in **Termux*
 
 ```
 🎤 termux-microphone-record → ffmpeg → whisper-cli (STT)
-   → ollama qwen3:1.7b (brain) → termux-tts-speak (Android TTS) 🔊
+   → llama-server / Qwen3-1.7B (brain) → termux-tts-speak (Android TTS) 🔊
 ```
 
-No internet at runtime. The only network use is the one-time setup download (whisper + LLM model).
+The LLM is run by a **llama.cpp build tuned for this exact chip** (aarch64 + `i8mm`/`dotprod`),
+not a generic runtime — faster and lighter than ollama on the MT6886. No internet at runtime;
+the only network use is the one-time setup download (STT + LLM models).
 
 ## Install (on the phone, in Termux)
 
@@ -19,7 +21,8 @@ Then paste this one line:
 pkg install -y git && git clone https://github.com/Peterc3-dev/phos-voice && bash phos-voice/setup.sh
 ```
 
-That installs ffmpeg/termux-api/python, downloads the whisper model (~57 MB) and the LLM (`qwen3:1.7b`, ~1.1 GB), and stages everything in `~/phos`.
+That installs ffmpeg/termux-api/python, and downloads the whisper model (~57 MB) and the LLM
+(`Qwen3-1.7B-Q4_K_M`, ~1.1 GB), staging everything in `~/phos`.
 
 ## Talk to it
 
@@ -27,9 +30,13 @@ That installs ffmpeg/termux-api/python, downloads the whisper model (~57 MB) and
 python ~/phos/phos_voice.py
 ```
 
-Speak when it says "speak now"; it transcribes, thinks, and talks back. Say **"goodbye"** or hit Ctrl-C to quit.
+Speak when it says "speak now"; it transcribes, replies, and talks back. Say **"goodbye"** or Ctrl-C to quit.
+(First launch loads the model into RAM, ~30–60 s; replies are quick after that.)
 
-Tunables: `VC_SECS` (record window, default 6), `VC_MODEL` (default `qwen3:1.7b`).
+Tunables: `VC_SECS` (record window, default 6), `VC_THREADS` (llama threads, default 4).
 
 ## Hardware note
-Built for the Phone 2a (Dimensity 7200 Pro, 8 GB). `qwen3:1.7b` is the sweet spot (~8 t/s, stable); the whisper binary is a prebuilt aarch64 build of whisper.cpp (`ggml-base.en-q5_1`).
+Built for the Phone 2a (Dimensity 7200 Pro, 8 GB), CPU-only (the MediaTek APU/NPU isn't usable by
+llama.cpp). Qwen3-1.7B is the sweet spot (~8 tok/s, stable on 8 GB); the STT binary is whisper.cpp
+(`ggml-base.en-q5_1`), and `llama-server` is the i8mm-tuned llama.cpp build. Threads default to 4
+(measured best for generation on this chip).
