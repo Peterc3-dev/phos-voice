@@ -80,7 +80,8 @@ def transcribe():
 
 def llm(history):
     body = json.dumps({"model": MODEL, "messages": history, "stream": False,
-                       "options": {"temperature": 0.7}}).encode()
+                       "think": False,                       # qwen3: skip the slow hidden reasoning
+                       "options": {"temperature": 0.7, "num_predict": 120}}).encode()
     req = urllib.request.Request(OLLAMA, data=body, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
